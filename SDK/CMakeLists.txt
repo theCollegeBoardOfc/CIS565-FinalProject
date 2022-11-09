@@ -473,32 +473,9 @@ endfunction()
 # If you wish to start your own sample, you can copy one of the sample's directories.
 # Just make sure you rename all the occurances of the sample's name in the C code as well
 # and the CMakeLists.txt file.
-add_subdirectory( optixBoundValues       )
-add_subdirectory( optixCallablePrograms  )
-add_subdirectory( optixCompileWithTasks  )
-add_subdirectory( optixConsole           )
-add_subdirectory( optixCurves            )
-add_subdirectory( optixCustomPrimitive   )
-add_subdirectory( optixCutouts           )
-add_subdirectory( optixDenoiser          )
-add_subdirectory( optixDynamicGeometry   )
-add_subdirectory( optixDynamicMaterials  )
-add_subdirectory( optixHair              )
-add_subdirectory( optixHello             )
-add_subdirectory( optixMeshViewer        )
-add_subdirectory( optixModuleCreateAbort )
-add_subdirectory( optixMotionGeometry    )
-add_subdirectory( optixMultiGPU          )
-add_subdirectory( optixNVLink            )
-add_subdirectory( optixOpticalFlow       )
-add_subdirectory( optixOpacityMicromap   )
+
 add_subdirectory( optixPathTracer        )
-add_subdirectory( optixRaycasting        )
-add_subdirectory( optixSimpleMotionBlur  )
-add_subdirectory( optixSphere            )
-add_subdirectory( optixTriangle          )
-add_subdirectory( optixVolumeViewer      )
-add_subdirectory( optixWhitted           )
+
 
 # Our sutil library.  The rules to build it are found in the subdirectory.
 add_subdirectory(sutil)
