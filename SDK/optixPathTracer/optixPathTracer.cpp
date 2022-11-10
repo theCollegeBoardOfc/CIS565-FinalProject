@@ -25,7 +25,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "support/tinyobj/tiny_obj_loader.h"
 #include <glad/glad.h>  // Needs to be included before gl_interop
 
 #include <cuda_gl_interop.h>
@@ -142,11 +143,12 @@ struct PathTracerState
 // Scene data
 //
 //------------------------------------------------------------------------------
-
-const int32_t TRIANGLE_COUNT = 32;
+static std::vector<Vertex> sceneData;
+static std::vector<uint32_t> materialMapping;
+const int32_t TRIANGLE_COUNT = 12;
 const int32_t MAT_COUNT      = 4;
 
-const static std::array<Vertex, TRIANGLE_COUNT* 3> g_vertices =
+static std::array<Vertex, TRIANGLE_COUNT* 3> g_vertices =
 {  {
     // Floor  -- white lambert
     {    0.0f,    0.0f,    0.0f, 0.0f },
@@ -192,88 +194,6 @@ const static std::array<Vertex, TRIANGLE_COUNT* 3> g_vertices =
     {  556.0f,  548.8f,  559.2f, 0.0f },
     {  556.0f,  548.8f,    0.0f, 0.0f },
 
-    // Short block -- white lambert
-    {  130.0f,  165.0f,   65.0f, 0.0f },
-    {   82.0f,  165.0f,  225.0f, 0.0f },
-    {  242.0f,  165.0f,  274.0f, 0.0f },
-
-    {  130.0f,  165.0f,   65.0f, 0.0f },
-    {  242.0f,  165.0f,  274.0f, 0.0f },
-    {  290.0f,  165.0f,  114.0f, 0.0f },
-
-    {  290.0f,    0.0f,  114.0f, 0.0f },
-    {  290.0f,  165.0f,  114.0f, 0.0f },
-    {  240.0f,  165.0f,  272.0f, 0.0f },
-
-    {  290.0f,    0.0f,  114.0f, 0.0f },
-    {  240.0f,  165.0f,  272.0f, 0.0f },
-    {  240.0f,    0.0f,  272.0f, 0.0f },
-
-    {  130.0f,    0.0f,   65.0f, 0.0f },
-    {  130.0f,  165.0f,   65.0f, 0.0f },
-    {  290.0f,  165.0f,  114.0f, 0.0f },
-
-    {  130.0f,    0.0f,   65.0f, 0.0f },
-    {  290.0f,  165.0f,  114.0f, 0.0f },
-    {  290.0f,    0.0f,  114.0f, 0.0f },
-
-    {   82.0f,    0.0f,  225.0f, 0.0f },
-    {   82.0f,  165.0f,  225.0f, 0.0f },
-    {  130.0f,  165.0f,   65.0f, 0.0f },
-
-    {   82.0f,    0.0f,  225.0f, 0.0f },
-    {  130.0f,  165.0f,   65.0f, 0.0f },
-    {  130.0f,    0.0f,   65.0f, 0.0f },
-
-    {  240.0f,    0.0f,  272.0f, 0.0f },
-    {  240.0f,  165.0f,  272.0f, 0.0f },
-    {   82.0f,  165.0f,  225.0f, 0.0f },
-
-    {  240.0f,    0.0f,  272.0f, 0.0f },
-    {   82.0f,  165.0f,  225.0f, 0.0f },
-    {   82.0f,    0.0f,  225.0f, 0.0f },
-
-    // Tall block -- white lambert
-    {  423.0f,  330.0f,  247.0f, 0.0f },
-    {  265.0f,  330.0f,  296.0f, 0.0f },
-    {  314.0f,  330.0f,  455.0f, 0.0f },
-
-    {  423.0f,  330.0f,  247.0f, 0.0f },
-    {  314.0f,  330.0f,  455.0f, 0.0f },
-    {  472.0f,  330.0f,  406.0f, 0.0f },
-
-    {  423.0f,    0.0f,  247.0f, 0.0f },
-    {  423.0f,  330.0f,  247.0f, 0.0f },
-    {  472.0f,  330.0f,  406.0f, 0.0f },
-
-    {  423.0f,    0.0f,  247.0f, 0.0f },
-    {  472.0f,  330.0f,  406.0f, 0.0f },
-    {  472.0f,    0.0f,  406.0f, 0.0f },
-
-    {  472.0f,    0.0f,  406.0f, 0.0f },
-    {  472.0f,  330.0f,  406.0f, 0.0f },
-    {  314.0f,  330.0f,  456.0f, 0.0f },
-
-    {  472.0f,    0.0f,  406.0f, 0.0f },
-    {  314.0f,  330.0f,  456.0f, 0.0f },
-    {  314.0f,    0.0f,  456.0f, 0.0f },
-
-    {  314.0f,    0.0f,  456.0f, 0.0f },
-    {  314.0f,  330.0f,  456.0f, 0.0f },
-    {  265.0f,  330.0f,  296.0f, 0.0f },
-
-    {  314.0f,    0.0f,  456.0f, 0.0f },
-    {  265.0f,  330.0f,  296.0f, 0.0f },
-    {  265.0f,    0.0f,  296.0f, 0.0f },
-
-    {  265.0f,    0.0f,  296.0f, 0.0f },
-    {  265.0f,  330.0f,  296.0f, 0.0f },
-    {  423.0f,  330.0f,  247.0f, 0.0f },
-
-    {  265.0f,    0.0f,  296.0f, 0.0f },
-    {  423.0f,  330.0f,  247.0f, 0.0f },
-    {  423.0f,    0.0f,  247.0f, 0.0f },
-
     // Ceiling light -- emmissive
     {  343.0f,  548.6f,  227.0f, 0.0f },
     {  213.0f,  548.6f,  227.0f, 0.0f },
@@ -290,10 +210,100 @@ static std::array<uint32_t, TRIANGLE_COUNT> g_mat_indices = {{
     0, 0,                          // Back wall     -- white lambert
     1, 1,                          // Right wall    -- green lambert
     2, 2,                          // Left wall     -- red lambert
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // Short block   -- white lambert
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  // Tall block    -- white lambert
     3, 3                           // Ceiling light -- emmissive
 }};
+
+
+void addHardCodeToDynamicScene() {
+    sceneData = std::vector<Vertex>(g_vertices.begin(), g_vertices.end());
+    materialMapping = std::vector<uint32_t>(g_mat_indices.begin(), g_mat_indices.end());
+}
+
+bool addObj(std::string filename) {
+    std::string inputfile = filename;
+    tinyobj::ObjReaderConfig reader_config;
+    reader_config.mtl_search_path = "../materials"; // Path to material files
+
+    tinyobj::ObjReader reader;
+
+    if (!reader.ParseFromFile(inputfile, reader_config)) {
+        if (!reader.Error().empty()) {
+            std::cerr << "TinyObjReader: " << reader.Error();
+        }
+        return false;
+    }
+
+    if (!reader.Warning().empty()) {
+        std::cout << "TinyObjReader: " << reader.Warning();
+    }
+
+    auto& attrib = reader.GetAttrib();
+    auto& shapes = reader.GetShapes();
+    auto& materials = reader.GetMaterials();
+    int size = 0;
+
+    for (size_t s = 0; s < shapes.size(); s++) {
+        // Loop over faces(polygon)
+        size_t index_offset = 0;
+        for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
+            size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
+
+            // Loop over vertices in the face.
+            for (size_t v = 0; v < fv; v++) {
+                // access to vertex
+                tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+                tinyobj::real_t vx = attrib.vertices[3 * size_t(idx.vertex_index) + 0];
+                tinyobj::real_t vy = attrib.vertices[3 * size_t(idx.vertex_index) + 1];
+                tinyobj::real_t vz = attrib.vertices[3 * size_t(idx.vertex_index) + 2];
+
+                /*if (v == 0) {
+                    scene->faces[size].p1 = glm::vec3(vx, vy, vz);
+                }
+                else if (v == 1) {
+                    scene->faces[size].p2 = glm::vec3(vx, vy, vz);
+                }
+                else if (v == 2) {
+                    scene->faces[size].p3 = glm::vec3(vx, vy, vz);
+                }
+                else {
+                    return false;
+                }*/
+
+                if (v == 0 || v == 1 || v == 2) {
+                    sceneData.push_back({ vx, vy, vz, 0.0 });
+                }
+                else {
+                    return false;
+                }
+
+                // Check if `normal_index` is zero or positive. negative = no normal data
+                if (idx.normal_index >= 0) {
+                    tinyobj::real_t nx = attrib.normals[3 * size_t(idx.normal_index) + 0];
+                    tinyobj::real_t ny = attrib.normals[3 * size_t(idx.normal_index) + 1];
+                    tinyobj::real_t nz = attrib.normals[3 * size_t(idx.normal_index) + 2];
+                }
+
+                // Check if `texcoord_index` is zero or positive. negative = no texcoord data
+                if (idx.texcoord_index >= 0) {
+                    tinyobj::real_t tx = attrib.texcoords[2 * size_t(idx.texcoord_index) + 0];
+                    tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
+                }
+
+                // Optional: vertex colors
+                // tinyobj::real_t red   = attrib.colors[3*size_t(idx.vertex_index)+0];
+                // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
+                // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
+            }
+            materialMapping.push_back(0);
+            index_offset += fv;
+            size++;
+
+            // per-face material
+            shapes[s].mesh.material_ids[f];
+        }
+    }
+    return true;
+}
 
 
 
@@ -576,20 +586,21 @@ void buildMeshAccel( PathTracerState& state )
     //
     // copy mesh data to device
     //
-    const size_t vertices_size_in_bytes = g_vertices.size() * sizeof( Vertex );
+    
+    const size_t vertices_size_in_bytes = sceneData.size() * sizeof( Vertex );
     CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &state.d_vertices ), vertices_size_in_bytes ) );
     CUDA_CHECK( cudaMemcpy(
                 reinterpret_cast<void*>( state.d_vertices ),
-                g_vertices.data(), vertices_size_in_bytes,
+                sceneData.data(), vertices_size_in_bytes,
                 cudaMemcpyHostToDevice
                 ) );
 
     CUdeviceptr  d_mat_indices             = 0;
-    const size_t mat_indices_size_in_bytes = g_mat_indices.size() * sizeof( uint32_t );
+    const size_t mat_indices_size_in_bytes = materialMapping.size() * sizeof( uint32_t );
     CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &d_mat_indices ), mat_indices_size_in_bytes ) );
     CUDA_CHECK( cudaMemcpy(
                 reinterpret_cast<void*>( d_mat_indices ),
-                g_mat_indices.data(),
+                materialMapping.data(),
                 mat_indices_size_in_bytes,
                 cudaMemcpyHostToDevice
                 ) );
@@ -609,7 +620,7 @@ void buildMeshAccel( PathTracerState& state )
     triangle_input.type                                      = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
     triangle_input.triangleArray.vertexFormat                = OPTIX_VERTEX_FORMAT_FLOAT3;
     triangle_input.triangleArray.vertexStrideInBytes         = sizeof( Vertex );
-    triangle_input.triangleArray.numVertices                 = static_cast<uint32_t>( g_vertices.size() );
+    triangle_input.triangleArray.numVertices                 = static_cast<uint32_t>(sceneData.size() );
     triangle_input.triangleArray.vertexBuffers               = &state.d_vertices;
     triangle_input.triangleArray.flags                       = triangle_input_flags;
     triangle_input.triangleArray.numSbtRecords               = MAT_COUNT;
@@ -977,7 +988,10 @@ int main( int argc, char* argv[] )
     //
     // Parse command line options
     //
+    std::string infile;
     std::string outfile;
+
+    addHardCodeToDynamicScene();
 
     for( int i = 1; i < argc; ++i )
     {
@@ -1010,6 +1024,11 @@ int main( int argc, char* argv[] )
                 printUsageAndExit( argv[0] );
             samples_per_launch = atoi( argv[++i] );
         }
+        else if (arg == "--obj") {
+            if (i >= argc - 1)
+                printUsageAndExit(argv[0]);
+            infile = argv[++i];
+        }
         else
         {
             std::cerr << "Unknown option '" << argv[i] << "'\n";
@@ -1019,6 +1038,7 @@ int main( int argc, char* argv[] )
 
     try
     {
+        addObj(infile);
         initCameraState();
 
         //
