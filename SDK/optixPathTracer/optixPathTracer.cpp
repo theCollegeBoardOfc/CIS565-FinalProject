@@ -172,6 +172,10 @@ struct PathTracerState
 // Scene data
 //
 //------------------------------------------------------------------------------
+//// Use std::vector to allow us to dynamically size for objs.
+static std::vector<Vertex> sceneMeshPositions;
+static std::vector<uint32_t> sceneMeshMaterial;
+static std::map<int, Matrix4x4> sceneMeshTransforms;
 
 const int32_t TRIANGLE_COUNT = 12;
 const int32_t MAT_COUNT = 4;
@@ -244,8 +248,8 @@ static std::array<uint32_t, TRIANGLE_COUNT> g_mat_indices = { {
 
 
 void addHardCodeToDynamicScene() {
-    sceneData = std::vector<Vertex>(g_vertices.begin(), g_vertices.end());
-    materialMapping = std::vector<uint32_t>(g_mat_indices.begin(), g_mat_indices.end());
+    sceneMeshPositions = std::vector<Vertex>(g_vertices.begin(), g_vertices.end());
+    sceneMeshMaterial = std::vector<uint32_t>(g_mat_indices.begin(), g_mat_indices.end());
 }
 
 bool addObj(std::string filename) {
@@ -281,7 +285,7 @@ bool addObj(std::string filename) {
             for (size_t v = 0; v < fv; v++) {
                 // access to vertex
                 tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
-                tinyobj::real_t vx = attrib.vertices[3 * size_t(idx.vertex_index) + 0];
+                tinyobj::real_t vx =  attrib.vertices[3 * size_t(idx.vertex_index) + 0];
                 tinyobj::real_t vy = attrib.vertices[3 * size_t(idx.vertex_index) + 1];
                 tinyobj::real_t vz = attrib.vertices[3 * size_t(idx.vertex_index) + 2];
 
@@ -299,7 +303,7 @@ bool addObj(std::string filename) {
                 }*/
 
                 if (v == 0 || v == 1 || v == 2) {
-                    sceneData.push_back({ vx, vy, vz, 0.0 });
+                    sceneMeshPositions.push_back({ vx, vy, vz, 0.0 });
                 }
                 else {
                     return false;
@@ -323,7 +327,7 @@ bool addObj(std::string filename) {
                 // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
                 // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
             }
-            materialMapping.push_back(0);
+            sceneMeshMaterial.push_back(0);
             index_offset += fv;
             size++;
 
@@ -333,7 +337,6 @@ bool addObj(std::string filename) {
     }
     return true;
 }
-
 
 
 const std::array<float3, MAT_COUNT> g_emission_colors =
@@ -353,11 +356,6 @@ const std::array<float3, MAT_COUNT> g_diffuse_colors =
     { 0.80f, 0.05f, 0.05f },
     { 0.50f, 0.00f, 0.00f }
 } };
-
-//// Use std::vector to allow us to dynamically size for objs.
-static std::vector<Vertex> sceneMeshPositions;
-static std::vector<uint32_t> sceneMeshMaterial;
-static std::map<int, Matrix4x4> sceneMeshTransforms;
 
 //------------------------------------------------------------------------------
 //
@@ -1176,18 +1174,6 @@ void loadGltfModel(std::string &filename) {
     //
     // Meshes
     //
-
-
-    //// add room data back into sceneMeshData
-
-    for (Vertex v : g_vertices) {
-        sceneMeshPositions.push_back(v);
-    }
-
-    for (uint32_t ind : g_mat_indices) {
-        sceneMeshMaterial.push_back(ind);
-    }
-
     ////
     //// Process nodes's transforms
     ////
@@ -1342,11 +1328,6 @@ void loadGltfModel(std::string &filename) {
                 sceneMeshMaterial.push_back(0);
                 sceneMeshMaterial.push_back(0);
 
-                numX += vertA.x;
-                numY += vertA.y;
-                numZ += vertA.z;
-
-                //std::cout << "vert x: " << vertA.x << " y: " << vertA.y << " z: " << vertA.z << std::endl;
             }
 
             std::cerr << "\t\tNum triangles: " << sceneMeshPositions.size() / 3 << std::endl;
@@ -1409,9 +1390,6 @@ void loadGltfModel(std::string &filename) {
             }*/
         }
     }
-
-std::cout << "size of sceneMeshPositions: " << sceneMeshPositions.size() - roomVerts << std::endl;
-std::cout << "numX: " << numX << " numY: " << numY << " numZ: " << numZ << std::endl;
 }
 #endif
 
@@ -1435,7 +1413,9 @@ int main(int argc, char* argv[])
     //
 
     std::string outfile;
-    std::string infile = sutil::sampleDataFilePath("Spitfire/scene.gltf");
+    std::string infile = sutil::sampleDataFilePath("Teapot/teapot.obj");
+
+    addHardCodeToDynamicScene();
 
     for (int i = 1; i < argc; ++i)
     {
@@ -1483,8 +1463,14 @@ int main(int argc, char* argv[])
     try
     {
         // load gltf data here
-        loadGltfModel(infile);
-        addObj(infile);
+        // TODO: xiaoyu check file extension
+        if (infile.find(".gltf") != std::string::npos) {
+            loadGltfModel(infile);
+        }
+        else {
+            addObj(infile);
+        }
+
         initCameraState();
 
         //
