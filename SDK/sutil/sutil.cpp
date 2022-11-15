@@ -443,6 +443,7 @@ void initImGui( GLFWwindow* window )
     io.Fonts->AddFontDefault();
 
     ImGui::GetStyle().WindowBorderSize = 0.0f;
+
 }
 
 
@@ -731,7 +732,6 @@ void displayFPS( unsigned int frame_count )
     }
 }
 
-
 void displayStats( std::chrono::duration<double>& state_update_time,
                           std::chrono::duration<double>& render_time,
                           std::chrono::duration<double>& display_time )
@@ -746,7 +746,7 @@ void displayStats( std::chrono::duration<double>& state_update_time,
 
     beginFrameImGui();
     last_update_frames++;
-
+    
     typedef std::chrono::duration<double, std::milli> durationMs;
 
     if( cur_time - last_update_time > display_update_min_interval_time || total_subframe_count == 0 )
@@ -771,14 +771,14 @@ void displayStats( std::chrono::duration<double>& state_update_time,
     ++total_subframe_count;
 }
 
-
 void displayText( const char* text, float x, float y )
 {
-    ImGui::SetNextWindowBgAlpha( 0.0f );
+    /*ImGui::SetNextWindowBgAlpha( 0.0f );*/
     ImGui::SetNextWindowPos( ImVec2( x, y ) );
-    ImGui::Begin( "TextOverlayFG", nullptr,
+    /*ImGui::Begin( "TextOverlayFG", nullptr,
                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
-                      | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs );
+                      | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs );*/
+    ImGui::Begin("TextOverlayFG");
     ImGui::TextColored( ImColor( 0.7f, 0.7f, 0.7f, 1.0f ), "%s", text );
     ImGui::End();
 }
@@ -1095,5 +1095,6 @@ void reportErrorMessage( const char* message )
     }
 #endif
 }
+
 
 } // namespace sutil

@@ -87,8 +87,9 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <string>
-
+#include <string.h>
+#include <Windows.h>
+#include <commdlg.h>
 using namespace sutil;
 
 bool resize_dirty = false;
@@ -578,8 +579,8 @@ static void context_log_cb(unsigned int level, const char* tag, const char* mess
 
 void initCameraState()
 {
-    camera.setEye(make_float3(20.0f, 20.0f, -90.0f));
-    camera.setLookat(make_float3(20.0f, 20.0f, 30.0f));
+    camera.setEye(make_float3(0.f, 0.f, -190.0f)); //20.0f, 20.0f, -90.0f
+    camera.setLookat(make_float3(0.0f, 0.0f, 30.0f)); //20.0f, 20.0f, 30.0f
     camera.setUp(make_float3(0.0f, 1.0f, 0.0f));
     camera.setFovY(35.0f);
     camera_changed = true;
@@ -1413,7 +1414,7 @@ int main(int argc, char* argv[])
     //
 
     std::string outfile;
-    std::string infile = sutil::sampleDataFilePath("Teapot/teapot.obj");
+    std::string infile = sutil::sampleDataFilePath("DuckDi/Duck.gltf");
 
     addHardCodeToDynamicScene();
 
@@ -1462,14 +1463,27 @@ int main(int argc, char* argv[])
 
     try
     {
-        // load gltf data here
-        // TODO: xiaoyu check file extension
-        if (infile.find(".gltf") != std::string::npos) {
-            loadGltfModel(infile);
+        char szFileName[MAX_PATH] = { 0 };
+        OPENFILENAME openFileName = { 0 };
+        openFileName.lStructSize = sizeof(OPENFILENAME);
+        openFileName.nMaxFile = MAX_PATH;  //这个必须设置，不设置的话不会出现打开文件对话框
+        openFileName.lpstrFilter = "Obj and gltf Files\0*.gltf;*.obj";
+        openFileName.lpstrFile = szFileName;
+        openFileName.nFilterIndex = 1;
+        openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+        if (GetOpenFileName(&openFileName))
+
+        {
+            infile =  openFileName.lpstrFile;
+            if (infile.find(".gltf") != std::string::npos) {
+                loadGltfModel(infile);
+                std::cout << "gltfokay!" << std::endl;
+            }
+            else {
+                addObj(infile);
+            }
         }
-        else {
-            addObj(infile);
-        }
+
 
         initCameraState();
 
@@ -1495,6 +1509,7 @@ int main(int argc, char* argv[])
             glfwSetKeyCallback(window, keyCallback);
             glfwSetScrollCallback(window, scrollCallback);
             glfwSetWindowUserPointer(window, &state.params);
+
 
             //
             // Render loop

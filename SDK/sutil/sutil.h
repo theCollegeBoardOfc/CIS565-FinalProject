@@ -171,5 +171,6 @@ SUTILAPI void ensureMinimumSize(
 
 SUTILAPI void reportErrorMessage( const char* message );
 
+
 } // end namespace sutil
 
