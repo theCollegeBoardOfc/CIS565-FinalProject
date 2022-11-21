@@ -67,7 +67,6 @@
 #include <string>
 #include <vector>
 
-#define GLTF_LOAD 1
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION        // Implementation in sutil.cpp
 #define STB_IMAGE_WRITE_IMPLEMENTATION  //
@@ -105,6 +104,11 @@ int32_t mouse_button = -1;
 
 int32_t samples_per_launch = 16;
 
+whitted::LaunchParams* d_params = nullptr;
+whitted::LaunchParams   params = {};
+int32_t                 width = 768;
+int32_t                 height = 768;
+
 //------------------------------------------------------------------------------
 //
 // Local types
@@ -141,7 +145,8 @@ struct Instance
     float transform[12];
 };
 
-
+#if TEST
+#else
 struct PathTracerState
 {
     OptixDeviceContext context = 0;
@@ -166,6 +171,7 @@ struct PathTracerState
 
     OptixShaderBindingTable        sbt = {};
 };
+#endif
 
 
 //------------------------------------------------------------------------------
@@ -380,7 +386,23 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
     }
 }
 
-
+#if TEST
+static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos)
+{
+    if (mouse_button == GLFW_MOUSE_BUTTON_LEFT)
+    {
+        trackball.setViewMode(sutil::Trackball::LookAtFixed);
+        trackball.updateTracking(static_cast<int>(xpos), static_cast<int>(ypos), width, height);
+        camera_changed = true;
+    }
+    else if (mouse_button == GLFW_MOUSE_BUTTON_RIGHT)
+    {
+        trackball.setViewMode(sutil::Trackball::EyeFixed);
+        trackball.updateTracking(static_cast<int>(xpos), static_cast<int>(ypos), width, height);
+        camera_changed = true;
+    }
+}
+#else
 static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos)
 {
     Params* params = static_cast<Params*>(glfwGetWindowUserPointer(window));
@@ -398,8 +420,24 @@ static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         camera_changed = true;
     }
 }
+#endif
 
+#if TEST
+static void windowSizeCallback_scene(GLFWwindow* window, int32_t res_x, int32_t res_y)
+{
+    // Keep rendering at the current resolution when the window is minimized.
+    if (minimized)
+        return;
 
+    // Output dimensions must be at least 1 in both x and y.
+    sutil::ensureMinimumSize(res_x, res_y);
+
+    width = res_x;
+    height = res_y;
+    camera_changed = true;
+    resize_dirty = true;
+}
+#else
 static void windowSizeCallback(GLFWwindow* window, int32_t res_x, int32_t res_y)
 {
     // Keep rendering at the current resolution when the window is minimized.
@@ -415,6 +453,7 @@ static void windowSizeCallback(GLFWwindow* window, int32_t res_x, int32_t res_y)
     camera_changed = true;
     resize_dirty = true;
 }
+#endif
 
 
 static void windowIconifyCallback(GLFWwindow* window, int32_t iconified)
@@ -464,7 +503,52 @@ void printUsageAndExit(const char* argv0)
     exit(0);
 }
 
+#if TEST
+void initLaunchParams_scene(const sutil::Scene& scene) {
+    CUDA_CHECK(cudaMalloc(
+        reinterpret_cast<void**>(&params.accum_buffer),
+        width * height * sizeof(float4)
+    ));
+    params.frame_buffer = nullptr; // Will be set when output buffer is mapped
 
+    params.subframe_index = 0u;
+
+    const float loffset = scene.aabb().maxExtent();
+
+    // TODO: add light support to sutil::Scene
+    std::vector<Light> lights(2);
+    lights[0].type = Light::Type::POINT;
+    lights[0].point.color = { 1.0f, 1.0f, 0.8f };
+    lights[0].point.intensity = 5.0f;
+    lights[0].point.position = scene.aabb().center() + make_float3(loffset);
+    lights[0].point.falloff = Light::Falloff::QUADRATIC;
+    lights[1].type = Light::Type::POINT;
+    lights[1].point.color = { 0.8f, 0.8f, 1.0f };
+    lights[1].point.intensity = 3.0f;
+    lights[1].point.position = scene.aabb().center() + make_float3(-loffset, 0.5f * loffset, -0.5f * loffset);
+    lights[1].point.falloff = Light::Falloff::QUADRATIC;
+
+    params.lights.count = static_cast<uint32_t>(lights.size());
+    CUDA_CHECK(cudaMalloc(
+        reinterpret_cast<void**>(&params.lights.data),
+        lights.size() * sizeof(Light)
+    ));
+    CUDA_CHECK(cudaMemcpy(
+        reinterpret_cast<void*>(params.lights.data),
+        lights.data(),
+        lights.size() * sizeof(Light),
+        cudaMemcpyHostToDevice
+    ));
+
+    params.miss_color = make_float3(0.1f);
+
+    //CUDA_CHECK( cudaStreamCreate( &stream ) );
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_params), sizeof(LaunchParams)));
+
+    params.handle = scene.traversableHandle();
+}
+
+#else
 void initLaunchParams(PathTracerState& state)
 {
     CUDA_CHECK(cudaMalloc(
@@ -487,8 +571,29 @@ void initLaunchParams(PathTracerState& state)
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&state.d_params), sizeof(Params)));
 
 }
+#endif
 
+#if TEST
+void handleCameraUpdate_scene(whitted::LaunchParams& params)
+{
+    if (!camera_changed)
+        return;
+    camera_changed = false;
 
+    camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
+    params.eye = camera.eye();
+    camera.UVWFrame(params.U, params.V, params.W);
+    /*
+    std::cerr
+        << "Updating camera:\n"
+        << "\tU: " << params.U.x << ", " << params.U.y << ", " << params.U.z << std::endl
+        << "\tV: " << params.V.x << ", " << params.V.y << ", " << params.V.z << std::endl
+        << "\tW: " << params.W.x << ", " << params.W.y << ", " << params.W.z << std::endl;
+        */
+
+}
+
+#else
 void handleCameraUpdate(Params& params)
 {
     if (!camera_changed)
@@ -499,8 +604,25 @@ void handleCameraUpdate(Params& params)
     params.eye = camera.eye();
     camera.UVWFrame(params.U, params.V, params.W);
 }
+#endif
 
+#if TEST
+void handleResize_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer)
+{
+    if (!resize_dirty)
+        return;
+    resize_dirty = false;
 
+    output_buffer.resize(width, height);
+
+    // Realloc accumulation buffer
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.accum_buffer)));
+    CUDA_CHECK(cudaMalloc(
+        reinterpret_cast<void**>(&params.accum_buffer),
+        width * height * sizeof(float4)
+    ));
+}
+#else
 void handleResize(sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params& params)
 {
     if (!resize_dirty)
@@ -516,8 +638,19 @@ void handleResize(sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params& params
         params.width * params.height * sizeof(float4)
     ));
 }
+#endif
 
+#if TEST
+void updateState_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, whitted::LaunchParams& params)
+{
+    // Update params on device
+    if (camera_changed || resize_dirty)
+        params.subframe_index = 0;
 
+    handleCameraUpdate_scene(params);
+    handleResize_scene(output_buffer);
+}
+#else 
 void updateState(sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params& params)
 {
     // Update params on device
@@ -527,8 +660,37 @@ void updateState(sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params& params)
     handleCameraUpdate(params);
     handleResize(output_buffer, params);
 }
+#endif
 
+#if TEST
+void launchSubframe_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, const sutil::Scene& scene)
+{
 
+    // Launch
+    uchar4* result_buffer_data = output_buffer.map();
+    params.frame_buffer = result_buffer_data;
+    CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(d_params),
+        &params,
+        sizeof(whitted::LaunchParams),
+        cudaMemcpyHostToDevice,
+        0 // stream
+    ));
+
+    OPTIX_CHECK(optixLaunch(
+        scene.pipeline(),
+        0,             // stream
+        reinterpret_cast<CUdeviceptr>(d_params),
+        sizeof(whitted::LaunchParams),
+        scene.sbt(),
+        width,  // launch width
+        height, // launch height
+        1       // launch depth
+    ));
+    output_buffer.unmap();
+    CUDA_SYNC_CHECK();
+}
+
+#else
 void launchSubframe(sutil::CUDAOutputBuffer<uchar4>& output_buffer, PathTracerState& state)
 {
     // Launch
@@ -553,7 +715,7 @@ void launchSubframe(sutil::CUDAOutputBuffer<uchar4>& output_buffer, PathTracerSt
     output_buffer.unmap();
     CUDA_SYNC_CHECK();
 }
-
+#endif
 
 void displaySubframe(sutil::CUDAOutputBuffer<uchar4>& output_buffer, sutil::GLDisplay& gl_display, GLFWwindow* window)
 {
@@ -576,7 +738,25 @@ static void context_log_cb(unsigned int level, const char* tag, const char* mess
     std::cerr << "[" << std::setw(2) << level << "][" << std::setw(12) << tag << "]: " << message << "\n";
 }
 
+#if TEST
+void initCameraState_scene(const sutil::Scene& scene)
+{
+    camera = scene.camera();
+    camera_changed = true;
 
+    trackball.setCamera(&camera);
+    trackball.setMoveSpeed(10.0f);
+    trackball.setReferenceFrame(make_float3(1.0f, 0.0f, 0.0f), make_float3(0.0f, 0.0f, 1.0f), make_float3(0.0f, 1.0f, 0.0f));
+    trackball.setGimbalLock(true);
+}
+
+void cleanup_scene()
+{
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.accum_buffer)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.lights.data)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_params)));
+}
+#else
 void initCameraState()
 {
     camera.setEye(make_float3(0.f, 0.f, -190.0f)); //20.0f, 20.0f, -90.0f
@@ -594,8 +774,10 @@ void initCameraState()
     );
     trackball.setGimbalLock(true);
 }
+#endif
 
-
+#if TEST
+#else
 void createContext(PathTracerState& state)
 {
     // Initialize CUDA
@@ -611,7 +793,6 @@ void createContext(PathTracerState& state)
 
     state.context = context;
 }
-
 
 void buildMeshAccel(PathTracerState& state)
 {
@@ -1004,8 +1185,6 @@ void cleanupState(PathTracerState& state)
     CUDA_CHECK(cudaFree(reinterpret_cast<void*>(state.d_params)));
 }
 
-#if GLTF_LOAD
-
 float3 make_float3_from_double(double x, double y, double z)
 {
     return make_float3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
@@ -1015,142 +1194,6 @@ float4 make_float4_from_double(double x, double y, double z, double w)
 {
     return make_float4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(w));
 }
-
-template<typename T>
-BufferView<T> bufferViewFromGLTF(const tinygltf::Model& model, const int32_t accessor_idx)
-{
-    if (accessor_idx == -1)
-        return BufferView<T>();
-
-    const auto& gltf_accessor = model.accessors[accessor_idx];
-    const auto& gltf_buffer_view = model.bufferViews[gltf_accessor.bufferView];
-
-    const int32_t elmt_byte_size =
-        gltf_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? 2 :
-        gltf_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT ? 4 :
-        gltf_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ? 4 :
-        0;
-    if (!elmt_byte_size)
-        throw Exception("gltf accessor component type not supported");
-
-    const CUdeviceptr buffer_base = scene.getBuffer(gltf_buffer_view.buffer);
-    BufferView<T> buffer_view;
-    buffer_view.data = buffer_base + gltf_buffer_view.byteOffset + gltf_accessor.byteOffset;
-    buffer_view.byte_stride = static_cast<uint16_t>(gltf_buffer_view.byteStride);
-    buffer_view.count = static_cast<uint32_t>(gltf_accessor.count);
-    buffer_view.elmt_byte_size = static_cast<uint16_t>(elmt_byte_size);
-
-    if (buffer_view.byte_stride == 0)
-    {
-        buffer_view.byte_stride = static_cast<uint16_t>(elmt_byte_size);
-        switch (gltf_accessor.type)
-        {
-        case TINYGLTF_TYPE_VEC2: buffer_view.byte_stride *= 2;  break;
-        case TINYGLTF_TYPE_VEC3: buffer_view.byte_stride *= 3;  break;
-        case TINYGLTF_TYPE_VEC4: buffer_view.byte_stride *= 4;  break;
-        case TINYGLTF_TYPE_MAT2: buffer_view.byte_stride *= 4;  break;
-        case TINYGLTF_TYPE_MAT3: buffer_view.byte_stride *= 9;  break;
-        case TINYGLTF_TYPE_MAT4: buffer_view.byte_stride *= 16; break;
-        default: break;
-        }
-    }
-
-    return buffer_view;
-}
-
-void processGLTFNode( const tinygltf::Model& model, const tinygltf::Node& gltf_node, const Matrix4x4& parent_matrix)
-{
-    const Matrix4x4 translation = gltf_node.translation.empty() ?
-        Matrix4x4::identity() :
-        Matrix4x4::translate(make_float3_from_double(
-            gltf_node.translation[0],
-            gltf_node.translation[1],
-            gltf_node.translation[2]
-        ));
-
-    const Matrix4x4 rotation = gltf_node.rotation.empty() ?
-        Matrix4x4::identity() :
-        Quaternion(
-            static_cast<float>(gltf_node.rotation[3]),
-            static_cast<float>(gltf_node.rotation[0]),
-            static_cast<float>(gltf_node.rotation[1]),
-            static_cast<float>(gltf_node.rotation[2])
-        ).rotationMatrix();
-
-    const Matrix4x4 scale = gltf_node.scale.empty() ?
-        Matrix4x4::identity() :
-        Matrix4x4::scale(make_float3_from_double(
-            gltf_node.scale[0],
-            gltf_node.scale[1],
-            gltf_node.scale[2]
-        ));
-
-    std::vector<float> gltf_matrix;
-    for (double x : gltf_node.matrix) {
-        gltf_matrix.push_back(static_cast<float>(x));
-    }
-    const Matrix4x4 matrix = gltf_node.matrix.empty() ?
-        Matrix4x4::identity() :
-        Matrix4x4(reinterpret_cast<float*>(gltf_matrix.data())).transpose();
-
-    const Matrix4x4 node_xform = parent_matrix * matrix * translation * rotation * scale;
-
-    if (gltf_node.camera != -1)
-    {
-        const auto& gltf_camera = model.cameras[gltf_node.camera];
-        std::cerr << "Processing camera '" << gltf_camera.name << "'\n"
-            << "\ttype: " << gltf_camera.type << "\n";
-        if (gltf_camera.type != "perspective")
-        {
-            std::cerr << "\tskipping non-perpective camera\n";
-            return;
-        }
-
-        const float3 eye = make_float3(node_xform * make_float4_from_double(0.0f, 0.0f, 0.0f, 1.0f));
-        const float3 up = make_float3(node_xform * make_float4_from_double(0.0f, 1.0f, 0.0f, 0.0f));
-        const float  yfov = static_cast<float>(gltf_camera.perspective.yfov) * 180.0f / static_cast<float>(M_PI);
-
-        std::cerr << "\teye   : " << eye.x << ", " << eye.y << ", " << eye.z << std::endl;
-        std::cerr << "\tup    : " << up.x << ", " << up.y << ", " << up.z << std::endl;
-        std::cerr << "\tfov   : " << yfov << std::endl;
-        std::cerr << "\taspect: " << gltf_camera.perspective.aspectRatio << std::endl;
-
-        //// set the already existing camera.
-        camera.setFovY(yfov);
-        camera.setAspectRatio(static_cast<float>(gltf_camera.perspective.aspectRatio));
-        camera.setEye(eye);
-        camera.setUp(up);
-        //scene.addCamera(camera);
-    }
-    else if (gltf_node.mesh != -1)
-    {
-        sceneMeshTransforms[gltf_node.mesh] = node_xform;
-        std::cout << "matrix for MESH " << gltf_node.mesh << " IS: " << std::endl;
-
-        const float* matrixData = matrix.getData();
-
-        for (int i = 0; i < 4; i++) {
-            std::cout << matrixData[i * 4 + 0] << " , " << matrixData[i * 4 + 1] << " , " << matrixData[i * 4 + 2] << " , " << matrixData[i * 4 + 3] << std::endl;
-        }
-
-        //std::cout << node_xform.getData().
-        //auto instance = std::make_shared<Scene::Instance>();
-        //instance->transform = node_xform;
-        //instance->mesh_idx = gltf_node.mesh;
-        //instance->world_aabb = scene.meshes()[gltf_node.mesh]->object_aabb;
-        //instance->world_aabb.transform(node_xform);
-        //scene.addInstance(instance);
-    }
-
-    if (!gltf_node.children.empty())
-    {
-        for (int32_t child : gltf_node.children)
-        {
-            processGLTFNode(model, model.nodes[child], node_xform);
-        }
-    }
-}
-
 
 void loadGltfModel(std::string &filename) {
     tinygltf::Model model;
@@ -1402,9 +1445,12 @@ void loadGltfModel(std::string &filename) {
 
 int main(int argc, char* argv[])
 {
+#if TEST
+#else
     PathTracerState state;
     state.params.width = 768;
     state.params.height = 768;
+#endif
     sutil::CUDAOutputBufferType output_buffer_type = sutil::CUDAOutputBufferType::GL_INTEROP;
 
     //sceneMeshData = std::vector<Vertex>();
@@ -1415,6 +1461,8 @@ int main(int argc, char* argv[])
 
     std::string outfile;
     std::string infile = sutil::sampleDataFilePath("DuckDi/Duck.gltf");
+
+    sutil::Scene scene;
 
     addHardCodeToDynamicScene();
 
@@ -1440,8 +1488,8 @@ int main(int argc, char* argv[])
             const std::string dims_arg = arg.substr(6);
             int w, h;
             sutil::parseDimensions(dims_arg.c_str(), w, h);
-            state.params.width = w;
-            state.params.height = h;
+            //state.params.width = w;
+            //state.params.height = h;
         }
         else if (arg == "--launch-samples" || arg == "-s")
         {
@@ -1476,7 +1524,17 @@ int main(int argc, char* argv[])
         {
             infile =  openFileName.lpstrFile;
             if (infile.find(".gltf") != std::string::npos) {
+#if TEST
+                sutil::loadScene(infile.c_str(), scene);
+                scene.finalize();
+
+                OPTIX_CHECK(optixInit()); // Need to initialize function table
+                initCameraState_scene(scene);
+                initLaunchParams_scene(scene);
+                
+#else
                 loadGltfModel(infile);
+#endif
                 std::cout << "gltfokay!" << std::endl;
             }
             else {
@@ -1484,7 +1542,9 @@ int main(int argc, char* argv[])
             }
         }
 
+#if TEST
 
+#else
         initCameraState();
 
         //
@@ -1497,24 +1557,41 @@ int main(int argc, char* argv[])
         createPipeline(state);
         createSBT(state);
         initLaunchParams(state);
+#endif
 
 
         if (outfile.empty())
         {
+#if TEST
+            GLFWwindow* window = sutil::initUI("optixPathTracer", width, height);
+
+#else
             GLFWwindow* window = sutil::initUI("optixPathTracer", state.params.width, state.params.height);
+#endif
             glfwSetMouseButtonCallback(window, mouseButtonCallback);
             glfwSetCursorPosCallback(window, cursorPosCallback);
-            glfwSetWindowSizeCallback(window, windowSizeCallback);
+            glfwSetWindowSizeCallback(window, windowSizeCallback_scene);
             glfwSetWindowIconifyCallback(window, windowIconifyCallback);
             glfwSetKeyCallback(window, keyCallback);
             glfwSetScrollCallback(window, scrollCallback);
+#if TEST
+            glfwSetWindowUserPointer(window, &params);
+#else
             glfwSetWindowUserPointer(window, &state.params);
+#endif
 
 
             //
             // Render loop
             //
             {
+#if TEST
+                sutil::CUDAOutputBuffer<uchar4> output_buffer(
+                    output_buffer_type,
+                    width,
+                    height
+                );
+#else
                 sutil::CUDAOutputBuffer<uchar4> output_buffer(
                     output_buffer_type,
                     state.params.width,
@@ -1522,6 +1599,7 @@ int main(int argc, char* argv[])
                 );
 
                 output_buffer.setStream(state.stream);
+#endif
                 sutil::GLDisplay gl_display;
 
                 std::chrono::duration<double> state_update_time(0.0);
@@ -1532,7 +1610,27 @@ int main(int argc, char* argv[])
                 {
                     auto t0 = std::chrono::steady_clock::now();
                     glfwPollEvents();
+#if TEST
+                    updateState_scene(output_buffer, params);
+                    auto t1 = std::chrono::steady_clock::now();
+                    state_update_time += t1 - t0;
+                    t0 = t1;
 
+                    launchSubframe_scene(output_buffer, scene);
+                    t1 = std::chrono::steady_clock::now();
+                    render_time += t1 - t0;
+                    t0 = t1;
+
+                    displaySubframe(output_buffer, gl_display, window);
+                    t1 = std::chrono::steady_clock::now();
+                    display_time += t1 - t0;
+
+                    sutil::displayStats(state_update_time, render_time, display_time);
+
+                    glfwSwapBuffers(window);
+
+                    ++params.subframe_index;
+#else
                     updateState(output_buffer, state.params);
                     auto t1 = std::chrono::steady_clock::now();
                     state_update_time += t1 - t0;
@@ -1546,12 +1644,12 @@ int main(int argc, char* argv[])
                     displaySubframe(output_buffer, gl_display, window);
                     t1 = std::chrono::steady_clock::now();
                     display_time += t1 - t0;
-
                     sutil::displayStats(state_update_time, render_time, display_time);
 
                     glfwSwapBuffers(window);
 
                     ++state.params.subframe_index;
+#endif
                 } while (!glfwWindowShouldClose(window));
                 CUDA_SYNC_CHECK();
             }
@@ -1565,7 +1663,12 @@ int main(int argc, char* argv[])
                 sutil::initGLFW();  // For GL context
                 sutil::initGL();
             }
-
+#if TEST
+            sutil::CUDAOutputBuffer<uchar4> output_buffer(output_buffer_type, width, height);
+            handleCameraUpdate_scene(params);
+            handleResize_scene(output_buffer);
+            launchSubframe_scene(output_buffer, scene);
+#else
             sutil::CUDAOutputBuffer<uchar4> output_buffer(
                 output_buffer_type,
                 state.params.width,
@@ -1575,6 +1678,7 @@ int main(int argc, char* argv[])
             handleCameraUpdate(state.params);
             handleResize(output_buffer, state.params);
             launchSubframe(output_buffer, state);
+#endif
 
             sutil::ImageBuffer buffer;
             buffer.data = output_buffer.getHostPointer();
@@ -1589,8 +1693,11 @@ int main(int argc, char* argv[])
                 glfwTerminate();
             }
         }
-
+#if TEST
+        cleanup_scene();
+#else
         cleanupState(state);
+#endif
     }
     catch (std::exception& e)
     {

@@ -27,9 +27,12 @@
 #
 
 OPTIX_add_sample_executable( optixPathTracer target_name
+  pathTracerUtils.h
   optixPathTracer.cu
   optixPathTracer.cpp
   optixPathTracer.h
+  SARScene.cpp
+  SARScene.h
   OPTIONS -rdc true
   )
 

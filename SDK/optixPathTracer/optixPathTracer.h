@@ -26,6 +26,13 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
+#include <cuda/BufferView.h>
+#include <cuda/GeometryData.h>
+#include <cuda/Light.h>
+#include <cuda/MaterialData.h>
+
+#define TEST 1
+
 enum RayType
 {
     RAY_TYPE_RADIANCE  = 0,
@@ -100,6 +107,29 @@ struct ParallelogramLight
     float3 emission;
 };
 
+#if TEST
+struct LaunchParams
+{
+    unsigned int             width;
+    unsigned int             height;
+    unsigned int             subframe_index;
+    unsigned int            samples_per_launch;
+
+    float4* accum_buffer;
+    uchar4* frame_buffer;
+    int                      max_depth;
+    float                    scene_epsilon;
+
+    float3                   eye;
+    float3                   U;
+    float3                   V;
+    float3                   W;
+
+    BufferView<ParallelogramLight>        lights;
+    float3                   miss_color;
+    OptixTraversableHandle   handle;
+};
+#else
 
 struct Params
 {
@@ -118,7 +148,7 @@ struct Params
     ParallelogramLight     light; // TODO: make light list
     OptixTraversableHandle handle;
 };
-
+#endif
 
 struct RayGenData
 {
@@ -133,6 +163,8 @@ struct MissData
 
 struct HitGroupData
 {
+    GeometryData geometry_data;
+    MaterialData material_data;
     float3  emission_color;
     float3  diffuse_color;
     float4* vertices;

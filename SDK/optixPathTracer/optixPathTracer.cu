@@ -34,7 +34,7 @@
 #include <cuda/helpers.h>
 
 extern "C" {
-__constant__ Params params;
+__constant__ LaunchParams params;
 }
 
 
@@ -392,7 +392,7 @@ extern "C" __global__ void __closesthit__radiance()
     const float z2 = rnd(seed);
     prd.seed = seed;
 
-    ParallelogramLight light = params.light;
+    ParallelogramLight light = params.lights[0];
     const float3 light_pos = light.corner + light.v1 * z1 + light.v2 * z2;
 
     // Calculate properties of light sample (for area based pdf)
