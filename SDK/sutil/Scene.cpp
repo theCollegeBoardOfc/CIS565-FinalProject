@@ -29,6 +29,7 @@
 #include <optix.h>
 #include <optix_function_table_definition.h>
 #include <optix_stubs.h>
+#include <optix_stack_size.h>
 
 #include <cuda/whitted.h>
 #include <sutil/Exception.h>
@@ -1275,23 +1276,48 @@ void Scene::buildInstanceAccel( int rayTypeCount )
 
 void Scene::createPTXModule()
 {
-
     OptixModuleCompileOptions module_compile_options = {};
 #if !defined( NDEBUG )
-    module_compile_options.optLevel   = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
+    module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
     module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 #endif
 
+    OptixPayloadType payloadTypes[2] = {};
+    // radiance prd
+    payloadTypes[0].numPayloadValues = sizeof(radiancePayloadSemantics) / sizeof(radiancePayloadSemantics[0]);
+    payloadTypes[0].payloadSemantics = radiancePayloadSemantics;
+    // occlusion prd
+    payloadTypes[1].numPayloadValues = sizeof(occlusionPayloadSemantics) / sizeof(occlusionPayloadSemantics[0]);
+    payloadTypes[1].payloadSemantics = occlusionPayloadSemantics;
+
+    module_compile_options.numPayloadTypes = 2;
+    module_compile_options.payloadTypes = payloadTypes;
+
     m_pipeline_compile_options = {};
-    m_pipeline_compile_options.usesMotionBlur            = false;
-    m_pipeline_compile_options.traversableGraphFlags     = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
-    m_pipeline_compile_options.numPayloadValues          = whitted::NUM_PAYLOAD_VALUES;
-    m_pipeline_compile_options.numAttributeValues        = 2; // TODO
-    m_pipeline_compile_options.exceptionFlags            = OPTIX_EXCEPTION_FLAG_NONE; // should be OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW;
+    m_pipeline_compile_options.usesMotionBlur = false;
+    m_pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING | OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;;
+    m_pipeline_compile_options.numPayloadValues = 0;
+    m_pipeline_compile_options.numAttributeValues = 2; // TODO
+
+#ifdef DEBUG // Enables debug exceptions during optix launches. This may incur significant performance cost and should only be done during development.
+    m_pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_DEBUG | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH | OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW;
+#else
+    m_pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
+#endif
     m_pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
     size_t      inputSize = 0;
-    const char* input     = sutil::getInputData( nullptr, nullptr, "whitted.cu", inputSize );
+    //const char* input     = sutil::getInputData( nullptr, nullptr, "whitted.cu", inputSize );
+    //const char* input = sutil::getInputData(OPTIX_SAMPLE_NAME, OPTIX_SAMPLE_DIR, "optixPathTracer.cu", inputSize);
+    std::cout << "OPTIX_SAMPLE_NAMME IS: " << OPTIX_SAMPLE_NAME << std::endl;
+    std::cout << "OPTIX_SAMPLE_DIR IS: " << OPTIX_SAMPLE_DIR << std::endl;
+
+    const char* optix_sample_name = "optixPathTracer";
+    const char* optix_sample_dir = "optixPathTracer";
+
+    const char* input = sutil::getInputData(optix_sample_name, optix_sample_dir, "optixPathTracer.cu", inputSize);
+
+    //const char* input = "optixPathTracer.cu";
 
     m_ptx_module  = {};
     OPTIX_CHECK_LOG( optixModuleCreateFromPTX(
@@ -1308,98 +1334,167 @@ void Scene::createPTXModule()
 
 void Scene::createProgramGroups()
 {
-    OptixProgramGroupOptions program_group_options = {};
+    OptixProgramGroupOptions  program_group_options = {};
 
-    //
-    // Ray generation
-    //
     {
-
         OptixProgramGroupDesc raygen_prog_group_desc = {};
-        raygen_prog_group_desc.kind                     = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-        raygen_prog_group_desc.raygen.module            = m_ptx_module;
-        raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__pinhole";
+        raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+        raygen_prog_group_desc.raygen.module = m_ptx_module;
+        raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
 
-        OPTIX_CHECK_LOG( optixProgramGroupCreate(
-                    m_context,
-                    &raygen_prog_group_desc,
-                    1,                             // num program groups
-                    &program_group_options,
-                    LOG, &LOG_SIZE,
-                    &m_raygen_prog_group
-                    )
-                );
+        OPTIX_CHECK_LOG(optixProgramGroupCreate(
+            m_context, &raygen_prog_group_desc,
+            1,  // num program groups
+            &program_group_options,
+            LOG, &LOG_SIZE,
+            &m_raygen_prog_group
+        ));
     }
 
-    //
-    // Miss
-    //
     {
         OptixProgramGroupDesc miss_prog_group_desc = {};
-        miss_prog_group_desc.kind                   = OPTIX_PROGRAM_GROUP_KIND_MISS;
-        miss_prog_group_desc.miss.module            = m_ptx_module;
-        miss_prog_group_desc.miss.entryFunctionName = "__miss__constant_radiance";
-        OPTIX_CHECK_LOG( optixProgramGroupCreate(
-                    m_context,
-                    &miss_prog_group_desc,
-                    1,                             // num program groups
-                    &program_group_options,
-                    LOG, &LOG_SIZE,
-                    &m_radiance_miss_group
-                    )
-                );
+        miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+        miss_prog_group_desc.miss.module = m_ptx_module;
+        miss_prog_group_desc.miss.entryFunctionName = "__miss__radiance";
+        OPTIX_CHECK_LOG(optixProgramGroupCreate(
+            m_context, &miss_prog_group_desc,
+            1,  // num program groups
+            &program_group_options,
+            LOG, &LOG_SIZE,
+            &m_radiance_miss_group
+        ));
 
-        memset( &miss_prog_group_desc, 0, sizeof( OptixProgramGroupDesc ) );
-        miss_prog_group_desc.kind                   = OPTIX_PROGRAM_GROUP_KIND_MISS;
-        miss_prog_group_desc.miss.module            = m_ptx_module;
+        memset(&miss_prog_group_desc, 0, sizeof(OptixProgramGroupDesc));
+        miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+        miss_prog_group_desc.miss.module = m_ptx_module;
         miss_prog_group_desc.miss.entryFunctionName = "__miss__occlusion";
-        OPTIX_CHECK_LOG( optixProgramGroupCreate(
-                    m_context,
-                    &miss_prog_group_desc,
-                    1,                             // num program groups
-                    &program_group_options,
-                    LOG, &LOG_SIZE,
-                    &m_occlusion_miss_group
-                    )
-                );
+        OPTIX_CHECK_LOG(optixProgramGroupCreate(
+            m_context, &miss_prog_group_desc,
+            1,  // num program groups
+            &program_group_options,
+            LOG, &LOG_SIZE,
+            &m_occlusion_miss_group
+        ));
     }
 
-    //
-    // Hit group
-    //
     {
         OptixProgramGroupDesc hit_prog_group_desc = {};
-        hit_prog_group_desc.kind                         = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-        hit_prog_group_desc.hitgroup.moduleCH            = m_ptx_module;
+        hit_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+        hit_prog_group_desc.hitgroup.moduleCH = m_ptx_module;
         hit_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__radiance";
-        hit_prog_group_desc.hitgroup.moduleAH            = m_ptx_module;
-        hit_prog_group_desc.hitgroup.entryFunctionNameAH = "__anyhit__radiance";
-        OPTIX_CHECK_LOG( optixProgramGroupCreate(
-                         m_context,
-                         &hit_prog_group_desc,
-                         1,                             // num program groups
-                         &program_group_options,
-                         LOG, &LOG_SIZE,
-                         &m_radiance_hit_group
-                         )
-                );
+        OPTIX_CHECK_LOG(optixProgramGroupCreate(
+            m_context,
+            &hit_prog_group_desc,
+            1,  // num program groups
+            &program_group_options,
+            LOG, &LOG_SIZE,
+            &m_radiance_hit_group
+        ));
 
-        memset( &hit_prog_group_desc, 0, sizeof( OptixProgramGroupDesc ) );
-        hit_prog_group_desc.kind                         = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-        hit_prog_group_desc.hitgroup.moduleAH            = m_ptx_module;
-        hit_prog_group_desc.hitgroup.entryFunctionNameAH = "__anyhit__occlusion";
-        OPTIX_CHECK_LOG( optixProgramGroupCreate(
-                         m_context,
-                         &hit_prog_group_desc,
-                         1,                             // num program groups
-                         &program_group_options,
-                         LOG, &LOG_SIZE,
-                         &m_occlusion_hit_group
-                         )
-                );
+        memset(&hit_prog_group_desc, 0, sizeof(OptixProgramGroupDesc));
+        hit_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+        hit_prog_group_desc.hitgroup.moduleCH = m_ptx_module;
+        hit_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__occlusion";
+        OPTIX_CHECK_LOG(optixProgramGroupCreate(
+            m_context,
+            &hit_prog_group_desc,
+            1,  // num program groups
+            &program_group_options,
+            LOG, &LOG_SIZE,
+            &m_occlusion_hit_group
+        ));
     }
-}
+    //OptixProgramGroupOptions program_group_options = {};
 
+    ////
+    //// Ray generation
+    ////
+    //{
+
+    //    OptixProgramGroupDesc raygen_prog_group_desc = {};
+    //    raygen_prog_group_desc.kind                     = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+    //    raygen_prog_group_desc.raygen.module            = m_ptx_module;
+    //    raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__pinhole";
+
+    //    OPTIX_CHECK_LOG( optixProgramGroupCreate(
+    //                m_context,
+    //                &raygen_prog_group_desc,
+    //                1,                             // num program groups
+    //                &program_group_options,
+    //                LOG, &LOG_SIZE,
+    //                &m_raygen_prog_group
+    //                )
+    //            );
+    //}
+
+    ////
+    //// Miss
+    ////
+    //{
+    //    OptixProgramGroupDesc miss_prog_group_desc = {};
+    //    miss_prog_group_desc.kind                   = OPTIX_PROGRAM_GROUP_KIND_MISS;
+    //    miss_prog_group_desc.miss.module            = m_ptx_module;
+    //    miss_prog_group_desc.miss.entryFunctionName = "__miss__constant_radiance";
+    //    OPTIX_CHECK_LOG( optixProgramGroupCreate(
+    //                m_context,
+    //                &miss_prog_group_desc,
+    //                1,                             // num program groups
+    //                &program_group_options,
+    //                LOG, &LOG_SIZE,
+    //                &m_radiance_miss_group
+    //                )
+    //            );
+
+    //    memset( &miss_prog_group_desc, 0, sizeof( OptixProgramGroupDesc ) );
+    //    miss_prog_group_desc.kind                   = OPTIX_PROGRAM_GROUP_KIND_MISS;
+    //    miss_prog_group_desc.miss.module            = m_ptx_module;
+    //    miss_prog_group_desc.miss.entryFunctionName = "__miss__occlusion";
+    //    OPTIX_CHECK_LOG( optixProgramGroupCreate(
+    //                m_context,
+    //                &miss_prog_group_desc,
+    //                1,                             // num program groups
+    //                &program_group_options,
+    //                LOG, &LOG_SIZE,
+    //                &m_occlusion_miss_group
+    //                )
+    //            );
+    //}
+
+    ////
+    //// Hit group
+    ////
+    //{
+    //    OptixProgramGroupDesc hit_prog_group_desc = {};
+    //    hit_prog_group_desc.kind                         = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+    //    hit_prog_group_desc.hitgroup.moduleCH            = m_ptx_module;
+    //    hit_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__radiance";
+    //    hit_prog_group_desc.hitgroup.moduleAH            = m_ptx_module;
+    //    hit_prog_group_desc.hitgroup.entryFunctionNameAH = "__anyhit__radiance";
+    //    OPTIX_CHECK_LOG( optixProgramGroupCreate(
+    //                     m_context,
+    //                     &hit_prog_group_desc,
+    //                     1,                             // num program groups
+    //                     &program_group_options,
+    //                     LOG, &LOG_SIZE,
+    //                     &m_radiance_hit_group
+    //                     )
+    //            );
+
+    //    memset( &hit_prog_group_desc, 0, sizeof( OptixProgramGroupDesc ) );
+    //    hit_prog_group_desc.kind                         = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+    //    hit_prog_group_desc.hitgroup.moduleAH            = m_ptx_module;
+    //    hit_prog_group_desc.hitgroup.entryFunctionNameAH = "__anyhit__occlusion";
+    //    OPTIX_CHECK_LOG( optixProgramGroupCreate(
+    //                     m_context,
+    //                     &hit_prog_group_desc,
+    //                     1,                             // num program groups
+    //                     &program_group_options,
+    //                     LOG, &LOG_SIZE,
+    //                     &m_occlusion_hit_group
+    //                     )
+    //            );
+    //}
+}
 
 void Scene::createPipeline()
 {
@@ -1413,7 +1508,7 @@ void Scene::createPipeline()
     };
 
     OptixPipelineLinkOptions pipeline_link_options = {};
-    pipeline_link_options.maxTraceDepth          = whitted::MAX_TRACE_DEPTH;
+    pipeline_link_options.maxTraceDepth = 2; // whitted::MAX_TRACE_DEPTH;
     pipeline_link_options.debugLevel             = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 
     OPTIX_CHECK_LOG( optixPipelineCreate(
@@ -1425,11 +1520,44 @@ void Scene::createPipeline()
                 LOG, &LOG_SIZE,
                 &m_pipeline
                 ) );
+
+    OptixStackSizes stack_sizes = {};
+    OPTIX_CHECK(optixUtilAccumulateStackSizes(m_raygen_prog_group, &stack_sizes));
+    OPTIX_CHECK(optixUtilAccumulateStackSizes(m_radiance_miss_group, &stack_sizes));
+    OPTIX_CHECK(optixUtilAccumulateStackSizes(m_occlusion_miss_group, &stack_sizes));
+    OPTIX_CHECK(optixUtilAccumulateStackSizes(m_radiance_hit_group, &stack_sizes));
+    OPTIX_CHECK(optixUtilAccumulateStackSizes(m_occlusion_hit_group, &stack_sizes));
+
+    uint32_t max_trace_depth = 2;
+    uint32_t max_cc_depth = 0;
+    uint32_t max_dc_depth = 0;
+    uint32_t direct_callable_stack_size_from_traversal;
+    uint32_t direct_callable_stack_size_from_state;
+    uint32_t continuation_stack_size;
+    OPTIX_CHECK(optixUtilComputeStackSizes(
+        &stack_sizes,
+        max_trace_depth,
+        max_cc_depth,
+        max_dc_depth,
+        &direct_callable_stack_size_from_traversal,
+        &direct_callable_stack_size_from_state,
+        &continuation_stack_size
+    ));
+
+    const uint32_t max_traversal_depth = 1;
+    OPTIX_CHECK(optixPipelineSetStackSize(
+        m_pipeline,
+        direct_callable_stack_size_from_traversal,
+        direct_callable_stack_size_from_state,
+        continuation_stack_size,
+        max_traversal_depth
+    ));
 }
 
 
 void Scene::createSBT()
 {
+
     {
         const size_t raygen_record_size = sizeof( EmptyRecord );
         CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &m_sbt.raygenRecord ), raygen_record_size ) );
@@ -1448,21 +1576,21 @@ void Scene::createSBT()
         const size_t miss_record_size = sizeof( EmptyRecord );
         CUDA_CHECK( cudaMalloc(
                     reinterpret_cast<void**>( &m_sbt.missRecordBase ),
-                    miss_record_size*whitted::RAY_TYPE_COUNT
+                    miss_record_size*RAY_TYPE_COUNT
                     ) );
 
-        EmptyRecord ms_sbt[ whitted::RAY_TYPE_COUNT ];
+        EmptyRecord ms_sbt[ RAY_TYPE_COUNT ];
         OPTIX_CHECK( optixSbtRecordPackHeader( m_radiance_miss_group,  &ms_sbt[0] ) );
         OPTIX_CHECK( optixSbtRecordPackHeader( m_occlusion_miss_group, &ms_sbt[1] ) );
 
         CUDA_CHECK( cudaMemcpy(
                     reinterpret_cast<void*>( m_sbt.missRecordBase ),
                     ms_sbt,
-                    miss_record_size*whitted::RAY_TYPE_COUNT,
+                    miss_record_size*RAY_TYPE_COUNT,
                     cudaMemcpyHostToDevice
                     ) );
         m_sbt.missRecordStrideInBytes = static_cast<uint32_t>( miss_record_size );
-        m_sbt.missRecordCount     = whitted::RAY_TYPE_COUNT;
+        m_sbt.missRecordCount     = RAY_TYPE_COUNT;
     }
 
     {

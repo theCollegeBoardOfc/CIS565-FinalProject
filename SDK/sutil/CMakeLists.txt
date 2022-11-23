@@ -61,6 +61,8 @@ set(sources
     Trackball.cpp
     Trackball.h
     vec_math.h
+    SARScene.cpp
+    SARScene.h
     )
 
 

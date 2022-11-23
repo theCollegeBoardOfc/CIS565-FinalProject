@@ -27,16 +27,23 @@
 //
 #include <optix.h>
 
+#include <cuda/LocalGeometry.h>
+#include <cuda/LocalShading.h>
 #include "optixPathTracer.h"
 #include "random.h"
 
 #include <sutil/vec_math.h>
 #include <cuda/helpers.h>
 
+#if TEST
 extern "C" {
-__constant__ LaunchParams params;
+    __constant__ LaunchParams params;
 }
-
+#else
+extern "C" {
+    __constant__ Params params;
+}
+#endif
 
 
 //------------------------------------------------------------------------------
@@ -246,14 +253,18 @@ static __forceinline__ __device__ bool traceOcclusion(
 
 extern "C" __global__ void __raygen__rg()
 {
-    const int    w   = params.width;
-    const int    h   = params.height;
+    //// debug hard code this
+    const int    w = params.width;
+    const int    h = params.height;
+
     const float3 eye = params.eye;
     const float3 U   = params.U;
     const float3 V   = params.V;
     const float3 W   = params.W;
     const uint3  idx = optixGetLaunchIndex();
+
     const int    subframe_index = params.subframe_index;
+    //printf("subframeIdx: %i\n", subframe_index);
 
     unsigned int seed = tea<4>( idx.y*w + idx.x, subframe_index );
 
@@ -268,6 +279,9 @@ extern "C" __global__ void __raygen__rg()
                 ( static_cast<float>( idx.x ) + subpixel_jitter.x ) / static_cast<float>( w ),
                 ( static_cast<float>( idx.y ) + subpixel_jitter.y ) / static_cast<float>( h )
                 ) - 1.0f;
+        //printf("eye: %f, %f, %f \n", params.eye.x, params.eye.y, params.eye.z);
+        //printf("d: %f, %f \n", d.x, d.y);
+
         float3 ray_direction = normalize(d.x*U + d.y*V + W);
         float3 ray_origin    = eye;
 
@@ -276,8 +290,12 @@ extern "C" __global__ void __raygen__rg()
         prd.seed         = seed;
         prd.depth        = 0;        
 
+        printf("ray origin: %f, %f, %f; ray depth: %f, %f, %f,;  depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, ray_direction.x, ray_direction.y, ray_direction.z, prd.depth);
+
+
         for( ;; )
         {
+            // printf("enterd for loop: %f\n", prd.depth);
             traceRadiance(
                     params.handle,
                     ray_origin,
@@ -289,11 +307,15 @@ extern "C" __global__ void __raygen__rg()
             result += prd.emitted;
             result += prd.radiance * prd.attenuation;
 
-            if( prd.done  || prd.depth >= 3 ) // TODO RR, variable for depth
+            if (prd.done || prd.depth >= 3) {// TODO RR, variable for depth
+                // printf("breaking  %f\n", prd.depth);
                 break;
+            }
 
             ray_origin    = prd.origin;
             ray_direction = prd.direction;
+
+            //printf("ray origin: %f, %f, %f , depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, prd.depth);
 
             ++prd.depth;
         }
@@ -310,6 +332,8 @@ extern "C" __global__ void __raygen__rg()
         const float3 accum_color_prev = make_float3( params.accum_buffer[ image_index ]);
         accum_color = lerp( accum_color_prev, accum_color, a );
     }
+
+    // printf("color: %f, %f, %f \n", accum_color.x, accum_color.y, accum_color.z);
     params.accum_buffer[ image_index ] = make_float4( accum_color, 1.0f);
     params.frame_buffer[ image_index ] = make_color ( accum_color );
 }
@@ -345,12 +369,22 @@ extern "C" __global__ void __closesthit__occlusion()
     storeOcclusionPRD( true );
 }
 
+__device__ __forceinline__ float3 linearize(float3 c)
+{
+    return make_float3(
+        powf(c.x, 2.2f),
+        powf(c.y, 2.2f),
+        powf(c.z, 2.2f)
+    );
+}
+
 
 extern "C" __global__ void __closesthit__radiance()
 {
     optixSetPayloadTypes( PAYLOAD_TYPE_RADIANCE );
 
     HitGroupData* rt_data = (HitGroupData*)optixGetSbtDataPointer();
+    const LocalGeometry          geom = getLocalGeometry(rt_data->geometry_data);
 
     const int    prim_idx        = optixGetPrimitiveIndex();
     const float3 ray_dir         = optixGetWorldRayDirection();
@@ -370,7 +404,6 @@ extern "C" __global__ void __closesthit__radiance()
         prd.emitted = rt_data->emission_color;
     else
         prd.emitted = make_float3( 0.0f );
-
 
     unsigned int seed = prd.seed;
 
@@ -392,7 +425,11 @@ extern "C" __global__ void __closesthit__radiance()
     const float z2 = rnd(seed);
     prd.seed = seed;
 
+#if TEST
     ParallelogramLight light = params.lights[0];
+#else
+    ParallelogramLight light = params.light;
+#endif
     const float3 light_pos = light.corner + light.v1 * z1 + light.v2 * z2;
 
     // Calculate properties of light sample (for area based pdf)

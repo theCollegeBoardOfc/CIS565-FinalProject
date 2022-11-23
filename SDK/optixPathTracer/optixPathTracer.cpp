@@ -29,6 +29,18 @@
 #include "support/tinyobj/tiny_obj_loader.h"
 #include <glad/glad.h>  // Needs to be included before gl_interop
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION        // Implementation in sutil.cpp
+#define STB_IMAGE_WRITE_IMPLEMENTATION  //
+#if defined( WIN32 )
+#    pragma warning( push )
+#    pragma warning( disable : 4267 )
+#endif
+#include <support/tinygltf/tiny_gltf.h>
+#if defined( WIN32 )
+#    pragma warning( pop )
+#endif
+
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 #include <cstring>
@@ -44,15 +56,13 @@
 #include <sutil/Exception.h>
 #include <sutil/GLDisplay.h>
 #include <sutil/Matrix.h>
-#include <sutil/Scene.h>
+//#include "SARScene.h"
 #include <sutil/Trackball.h>
 #include <sutil/sutil.h>
 #include <sutil/vec_math.h>
 #include <sutil/Quaternion.h>
 #include <optix_stack_size.h>
 
-#include <cuda/BufferView.h>
-#include <cuda/MaterialData.h>
 #include <cuda/whitted.h>
 #include <sutil/Aabb.h>
 #include <sutil/Camera.h>
@@ -74,7 +84,7 @@
 #    pragma warning( push )
 #    pragma warning( disable : 4267 )
 #endif
-#include <support/tinygltf/tiny_gltf.h>
+// #include <support/tinygltf/tiny_gltf.h>
 
 #include <GLFW/glfw3.h>
 
@@ -104,10 +114,12 @@ int32_t mouse_button = -1;
 
 int32_t samples_per_launch = 16;
 
-whitted::LaunchParams* d_params = nullptr;
-whitted::LaunchParams   params = {};
+#if TEST
+LaunchParams* d_params = nullptr;
+LaunchParams   params = {};
 int32_t                 width = 768;
 int32_t                 height = 768;
+#endif
 
 //------------------------------------------------------------------------------
 //
@@ -546,6 +558,9 @@ void initLaunchParams_scene(const sutil::Scene& scene) {
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_params), sizeof(LaunchParams)));
 
     params.handle = scene.traversableHandle();
+
+    cudaMemset(reinterpret_cast<void*>(params.width), 768, sizeof(int32_t));
+    cudaMemset(reinterpret_cast<void*>(params.height), 768, sizeof(int32_t));
 }
 
 #else
@@ -574,7 +589,7 @@ void initLaunchParams(PathTracerState& state)
 #endif
 
 #if TEST
-void handleCameraUpdate_scene(whitted::LaunchParams& params)
+void handleCameraUpdate_scene(LaunchParams& params)
 {
     if (!camera_changed)
         return;
@@ -641,7 +656,7 @@ void handleResize(sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params& params
 #endif
 
 #if TEST
-void updateState_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, whitted::LaunchParams& params)
+void updateState_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, LaunchParams& params)
 {
     // Update params on device
     if (camera_changed || resize_dirty)
@@ -671,7 +686,7 @@ void launchSubframe_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, const 
     params.frame_buffer = result_buffer_data;
     CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(d_params),
         &params,
-        sizeof(whitted::LaunchParams),
+        sizeof(LaunchParams),
         cudaMemcpyHostToDevice,
         0 // stream
     ));
@@ -680,7 +695,7 @@ void launchSubframe_scene(sutil::CUDAOutputBuffer<uchar4>& output_buffer, const 
         scene.pipeline(),
         0,             // stream
         reinterpret_cast<CUdeviceptr>(d_params),
-        sizeof(whitted::LaunchParams),
+        sizeof(LaunchParams),
         scene.sbt(),
         width,  // launch width
         height, // launch height
@@ -754,6 +769,8 @@ void cleanup_scene()
 {
     CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.accum_buffer)));
     CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.lights.data)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.width)));
+    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(params.height)));
     CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_params)));
 }
 #else
@@ -1195,6 +1212,99 @@ float4 make_float4_from_double(double x, double y, double z, double w)
     return make_float4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(w));
 }
 
+void processGLTFNode(const tinygltf::Model& model, const tinygltf::Node& gltf_node, const Matrix4x4& parent_matrix)
+{
+    const Matrix4x4 translation = gltf_node.translation.empty() ?
+        Matrix4x4::identity() :
+        Matrix4x4::translate(make_float3_from_double(
+            gltf_node.translation[0],
+            gltf_node.translation[1],
+            gltf_node.translation[2]
+        ));
+
+    const Matrix4x4 rotation = gltf_node.rotation.empty() ?
+        Matrix4x4::identity() :
+        Quaternion(
+            static_cast<float>(gltf_node.rotation[3]),
+            static_cast<float>(gltf_node.rotation[0]),
+            static_cast<float>(gltf_node.rotation[1]),
+            static_cast<float>(gltf_node.rotation[2])
+        ).rotationMatrix();
+
+    const Matrix4x4 scale = gltf_node.scale.empty() ?
+        Matrix4x4::identity() :
+        Matrix4x4::scale(make_float3_from_double(
+            gltf_node.scale[0],
+            gltf_node.scale[1],
+            gltf_node.scale[2]
+        ));
+
+    std::vector<float> gltf_matrix;
+    for (double x : gltf_node.matrix) {
+        gltf_matrix.push_back(static_cast<float>(x));
+    }
+    const Matrix4x4 matrix = gltf_node.matrix.empty() ?
+        Matrix4x4::identity() :
+        Matrix4x4(reinterpret_cast<float*>(gltf_matrix.data())).transpose();
+
+    const Matrix4x4 node_xform = parent_matrix * matrix * translation * rotation * scale;
+
+    if (gltf_node.camera != -1)
+    {
+        const auto& gltf_camera = model.cameras[gltf_node.camera];
+        std::cerr << "Processing camera '" << gltf_camera.name << "'\n"
+            << "\ttype: " << gltf_camera.type << "\n";
+        if (gltf_camera.type != "perspective")
+        {
+            std::cerr << "\tskipping non-perpective camera\n";
+            return;
+        }
+
+        const float3 eye = make_float3(node_xform * make_float4_from_double(0.0f, 0.0f, 0.0f, 1.0f));
+        const float3 up = make_float3(node_xform * make_float4_from_double(0.0f, 1.0f, 0.0f, 0.0f));
+        const float  yfov = static_cast<float>(gltf_camera.perspective.yfov) * 180.0f / static_cast<float>(M_PI);
+
+        std::cerr << "\teye   : " << eye.x << ", " << eye.y << ", " << eye.z << std::endl;
+        std::cerr << "\tup    : " << up.x << ", " << up.y << ", " << up.z << std::endl;
+        std::cerr << "\tfov   : " << yfov << std::endl;
+        std::cerr << "\taspect: " << gltf_camera.perspective.aspectRatio << std::endl;
+
+        //// set the already existing camera.
+        camera.setFovY(yfov);
+        camera.setAspectRatio(static_cast<float>(gltf_camera.perspective.aspectRatio));
+        camera.setEye(eye);
+        camera.setUp(up);
+        //scene.addCamera(camera);
+    }
+    else if (gltf_node.mesh != -1)
+    {
+        sceneMeshTransforms[gltf_node.mesh] = node_xform;
+        std::cout << "matrix for MESH " << gltf_node.mesh << " IS: " << std::endl;
+
+        const float* matrixData = matrix.getData();
+
+        for (int i = 0; i < 4; i++) {
+            std::cout << matrixData[i * 4 + 0] << " , " << matrixData[i * 4 + 1] << " , " << matrixData[i * 4 + 2] << " , " << matrixData[i * 4 + 3] << std::endl;
+        }
+
+        //std::cout << node_xform.getData().
+        //auto instance = std::make_shared<Scene::Instance>();
+        //instance->transform = node_xform;
+        //instance->mesh_idx = gltf_node.mesh;
+        //instance->world_aabb = scene.meshes()[gltf_node.mesh]->object_aabb;
+        //instance->world_aabb.transform(node_xform);
+        //scene.addInstance(instance);
+    }
+
+    if (!gltf_node.children.empty())
+    {
+        for (int32_t child : gltf_node.children)
+        {
+            processGLTFNode(model, model.nodes[child], node_xform);
+        }
+    }
+}
+
 void loadGltfModel(std::string &filename) {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -1446,6 +1556,9 @@ void loadGltfModel(std::string &filename) {
 int main(int argc, char* argv[])
 {
 #if TEST
+    params.width = 768;
+    params.height = 768;
+
 #else
     PathTracerState state;
     state.params.width = 768;
@@ -1570,7 +1683,11 @@ int main(int argc, char* argv[])
 #endif
             glfwSetMouseButtonCallback(window, mouseButtonCallback);
             glfwSetCursorPosCallback(window, cursorPosCallback);
+#if TEST
             glfwSetWindowSizeCallback(window, windowSizeCallback_scene);
+#else
+            glfwSetWindowSizeCallback(window, windowSizeCallback);
+#endif
             glfwSetWindowIconifyCallback(window, windowIconifyCallback);
             glfwSetKeyCallback(window, keyCallback);
             glfwSetScrollCallback(window, scrollCallback);
