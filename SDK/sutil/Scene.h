@@ -255,7 +255,6 @@ public:
         Aabb                              object_aabb;
     };
 
-
     SUTILAPI void addCamera  ( const Camera& camera            )    { m_cameras.push_back( camera );     }
     SUTILAPI void addInstance( std::shared_ptr<Instance> instance ) { m_instances.push_back( instance ); }
     SUTILAPI void addMesh    ( std::shared_ptr<MeshGroup> mesh )    { m_meshes.push_back( mesh );        }
@@ -292,9 +291,13 @@ public:
     SUTILAPI const std::vector<std::shared_ptr<MeshGroup>>& meshes() const            { return m_meshes;     }
     SUTILAPI const std::vector<std::shared_ptr<Instance>>&  instances() const         { return m_instances;  }
 
+    // di
+    //SUTILAPI const CUstream                                 stream() const            { return m_stream;     }
+
     SUTILAPI void createContext();
     SUTILAPI void buildMeshAccels();
-    SUTILAPI void buildInstanceAccel( int rayTypeCount = whitted::RAY_TYPE_COUNT );
+    SUTILAPI void buildInstanceAccel( int rayTypeCount = RAY_TYPE_COUNT );
+
 
 private:
     void createPTXModule();

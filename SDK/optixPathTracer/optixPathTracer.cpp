@@ -559,8 +559,8 @@ void initLaunchParams_scene(const sutil::Scene& scene) {
 
     params.handle = scene.traversableHandle();
 
-    cudaMemset(reinterpret_cast<void*>(params.width), 768, sizeof(int32_t));
-    cudaMemset(reinterpret_cast<void*>(params.height), 768, sizeof(int32_t));
+    //cudaMemset(reinterpret_cast<void*>(params.width), 768, sizeof(int32_t));
+    //cudaMemset(reinterpret_cast<void*>(params.height), 768, sizeof(int32_t));
 }
 
 #else

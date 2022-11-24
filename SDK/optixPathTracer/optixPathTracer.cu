@@ -290,7 +290,7 @@ extern "C" __global__ void __raygen__rg()
         prd.seed         = seed;
         prd.depth        = 0;        
 
-        printf("ray origin: %f, %f, %f; ray depth: %f, %f, %f,;  depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, ray_direction.x, ray_direction.y, ray_direction.z, prd.depth);
+        //printf("ray origin: %f, %f, %f; ray depth: %f, %f, %f,;  depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, ray_direction.x, ray_direction.y, ray_direction.z, prd.depth);
 
 
         for( ;; )
@@ -315,7 +315,7 @@ extern "C" __global__ void __raygen__rg()
             ray_origin    = prd.origin;
             ray_direction = prd.direction;
 
-            //printf("ray origin: %f, %f, %f , depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, prd.depth);
+            printf("ray origin: %f, %f, %f; ray depth: %f, %f, %f,;  depth: %f\n", ray_origin.x, ray_origin.y, ray_origin.z, ray_direction.x, ray_direction.y, ray_direction.z, prd.depth);
 
             ++prd.depth;
         }
